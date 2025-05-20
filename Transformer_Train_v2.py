@@ -29,35 +29,39 @@ def parse_args():
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
-    parser.add_argument("--epochs", type=int, default=2, help="Number of epochs to train for")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs to train for")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--mask_ratio", type=float, default=0.50, help="Ratio of tokens to mask")
-    parser.add_argument("--num_workers", type=int, default=8, help="Number of dataloader workers")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of dataloader workers")
     parser.add_argument("--train_split", type=float, default=0.8, help="Train/val split ratio")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     
     # Debug options
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with subset of data")
-    parser.add_argument("--max_waveforms", type=int, default=10000, 
+    parser.add_argument("--max_waveforms", type=int, default=200, 
                         help="Maximum number of waveforms to use when debug mode is enabled")
     
     # Model parameters
-    parser.add_argument("--encoder_dim", type=int, default=256, help="Encoder embedding dimension")
-    parser.add_argument("--decoder_dim", type=int, default=128, help="Decoder embedding dimension")
-    parser.add_argument("--encoder_heads", type=int, default=8, help="Number of encoder attention heads")
-    parser.add_argument("--decoder_heads", type=int, default=4, help="Number of decoder attention heads")
-    parser.add_argument("--encoder_layers", type=int, default=6, help="Number of encoder layers")
-    parser.add_argument("--decoder_layers", type=int, default=2, help="Number of decoder layers")
-    parser.add_argument("--encoder_mlp_ratio", type=int, default=8, help="Encoder MLP ratio")
-    parser.add_argument("--decoder_mlp_ratio", type=int, default=4, help="Decoder MLP ratio")
+    parser.add_argument("--encoder_dim", type=int, default=64, help="Encoder embedding dimension")
+    parser.add_argument("--decoder_dim", type=int, default=64, help="Decoder embedding dimension")
+    parser.add_argument("--encoder_heads", type=int, default=16, help="Number of encoder attention heads")
+    parser.add_argument("--decoder_heads", type=int, default=8, help="Number of decoder attention heads")
+    parser.add_argument("--encoder_layers", type=int, default=12, help="Number of encoder layers")
+    parser.add_argument("--decoder_layers", type=int, default=6, help="Number of decoder layers")
+    parser.add_argument("--encoder_mlp_ratio", type=int, default=16, help="Encoder MLP ratio")
+    parser.add_argument("--decoder_mlp_ratio", type=int, default=8, help="Decoder MLP ratio")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+    
+    # New feature separation parameters
+    parser.add_argument("--spatial_dim", type=int, default=17, help="Dimension of spatial features (8 for x + 8 for y + 1 for z)")
+    parser.add_argument("--non_spatial_dim", type=int, default=2, help="Dimension of non-spatial features (1 for charge + 1 for delta time)")
     
     # W&B parameters
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
     parser.add_argument("--project", type=str, default="pmt-mae-transformer", help="W&B project name")
     parser.add_argument("--run_name", type=str, default=None, help="W&B run name")
-    parser.add_argument("--warmup_epochs", type=int, default=2, help="Number of warmup epochs for LR scheduler")
+    parser.add_argument("--warmup_epochs", type=int, default=0, help="Number of warmup epochs for LR scheduler")
     
     return parser.parse_args()
 
@@ -183,7 +187,7 @@ def validate(model, dataloader, device, epoch):
     sample_outputs = []
     sample_targets = []
     sample_attention_masks = [] 
-    max_samples = 5  
+    max_samples = 50  
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Validation"):
@@ -271,7 +275,7 @@ def log_wandb_metrics(train_metrics, val_metrics, epoch, args):
         return
         
     # Log Metrics on Wandb
-    wandb.log({
+    metrics = {
         # Training losses
         "losses/train_q_loss": train_metrics["train_q_loss"],
         "losses/train_dt_loss": train_metrics["train_dt_loss"],
@@ -289,9 +293,17 @@ def log_wandb_metrics(train_metrics, val_metrics, epoch, args):
         
         # Model parameters
         "model/mask_ratio": args.mask_ratio,
-    }, step=epoch)
+    }
+    
+    # Make sure metrics are all scalar values (not tensors)
+    for key, value in metrics.items():
+        if torch.is_tensor(value):
+            metrics[key] = value.item()
+    
+    # Explicitly log each metric
+    wandb.log(metrics, step=epoch)
 
-def log_wandb_reconstruction_examples(samples, epoch):
+def log_wandb_reconstruction_examples(samples, epoch, args):
     """Log reconstruction examples with absolute error for masked regions only"""
     if not args.wandb:
         return
@@ -299,7 +311,7 @@ def log_wandb_reconstruction_examples(samples, epoch):
     try:
         import matplotlib.pyplot as plt
         
-        for i in range(min(len(samples["inputs"]), 3)):  
+        for i in range(min(len(samples["inputs"]), 10)):  
             fig = plt.figure(figsize=(12, 8))
             
             # Get data
@@ -350,10 +362,9 @@ def log_wandb_reconstruction_examples(samples, epoch):
             
             plt.tight_layout()
             
-            # Log the figure to wandb
-            wandb.log({
-                f"reconstruction/example_{i+1}": wandb.Image(fig),
-            }, step=epoch)
+            # Log the figure to wandb - explicitly create the wandb.Image object
+            wandb_img = wandb.Image(fig)
+            wandb.log({f"reconstruction/example_{i+1}": wandb_img}, step=epoch)
             
             plt.close(fig)
             
@@ -407,15 +418,16 @@ def log_wandb_reconstruction_examples(samples, epoch):
                 
                 plt.tight_layout()
                 
-                # Log the dt figure to wandb
-                wandb.log({
-                    f"reconstruction/dt_example_{i+1}": wandb.Image(fig),
-                }, step=epoch)
+                # Log the dt figure to wandb - explicitly create the wandb.Image object
+                wandb_img = wandb.Image(fig)
+                wandb.log({f"reconstruction/dt_example_{i+1}": wandb_img}, step=epoch)
                 
                 plt.close(fig)
                 
     except Exception as e:
         print(f"Error in reconstruction logging: {e}")
+        import traceback
+        traceback.print_exc()
 
 def main():
     # Parse command line arguments
@@ -439,8 +451,6 @@ def main():
         torch.backends.cudnn.allow_tf32 = True
     
         torch.cuda.empty_cache()
-     #   torch.cuda.memory.set_per_process_memory_fraction(0.8)  
-     #   logger.info("Set GPU memory utilization target to 80%")
 
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -455,19 +465,29 @@ def main():
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Initialize W&B
+    # Initialize W&B - make sure to update the init call
     if args.wandb:
-        run_name = args.run_name if args.run_name else f"mae-pmt-e{args.encoder_dim}-h{args.encoder_heads}-l{args.encoder_layers}-mr{args.mask_ratio}"
-        wandb.init(
-            project=args.project,
-            name=run_name,
-            config=vars(args)
-        )
-        # Log the mask ratio explicitly in config
-        logger.info(f"Using mask ratio: {args.mask_ratio}")
-        
-        # Log code to W&B
-        wandb.run.log_code(".", include_fn=lambda path: path.endswith(".py"))
+        try:
+            import wandb
+            
+            run_name = args.run_name if args.run_name else f"mae-pmt-e{args.encoder_dim}-h{args.encoder_heads}-l{args.encoder_layers}-mr{args.mask_ratio}"
+            wandb.init(
+                project=args.project,
+                name=run_name,
+                config=vars(args),
+                resume=False  # Make sure we're creating a new run
+            )
+            logger.info(f"W&B initialized successfully with run name: {run_name}")
+            
+            # Log the mask ratio explicitly in config
+            logger.info(f"Using mask ratio: {args.mask_ratio}")
+            
+            # Log code to W&B
+            wandb.run.log_code(".", include_fn=lambda path: path.endswith(".py"))
+        except Exception as e:
+            logger.error(f"Error initializing W&B: {e}")
+            args.wandb = False  # Disable wandb if initialization fails
+            logger.warning("Continuing without W&B logging")
     
     # Set max_waveforms for debug mode
     # In debug mode, we load at most args.max_waveforms from each dataset
@@ -492,8 +512,20 @@ def main():
         max_waveforms=max_waveforms  
     )
     
-    # Create model
+    # Get spatial and non-spatial dimensions from the dataset
+    # We could use args.spatial_dim and args.non_spatial_dim, but extracting from the dataset
+    # ensures consistency
+    dataset = train_loader.dataset.datasets[0].dataset  # Access the underlying MAEPMTDataset
+    spatial_dim = dataset.spatial_dim
+    non_spatial_dim = dataset.non_spatial_dim
+    
+    logger.info(f"Dataset feature dimensions - Spatial: {spatial_dim}, Non-spatial: {non_spatial_dim}")
+    
+    # Create model with separated spatial and non-spatial features
     model = MAETransformerModel(
+        input_dim=spatial_dim + non_spatial_dim,  # Total input dimension
+        spatial_dim=spatial_dim,
+        non_spatial_dim=non_spatial_dim,
         encoder_embedding_dim=args.encoder_dim,
         decoder_embedding_dim=args.decoder_dim,
         encoder_num_heads=args.encoder_heads,
@@ -529,10 +561,16 @@ def main():
         # Validate
         val_metrics = validate(model, val_loader, device, epoch)
         
-        # Log simplified metrics to wandb
+        # Log simplified metrics to wandb - add try-except block to catch potential errors
         if args.wandb:
-            log_wandb_metrics(train_metrics, val_metrics, epoch, args)
-            log_wandb_reconstruction_examples(val_metrics["samples"], epoch)
+            try:
+                log_wandb_metrics(train_metrics, val_metrics, epoch, args)
+                log_wandb_reconstruction_examples(val_metrics["samples"], epoch, args)
+                logger.info("Successfully logged metrics and examples to W&B")
+            except Exception as e:
+                logger.error(f"Error logging to W&B: {e}")
+                import traceback
+                traceback.print_exc()
         
         metrics = {
             **train_metrics,
@@ -589,7 +627,11 @@ def main():
     
     # Close wandb
     if args.wandb:
-        wandb.finish()
+        try:
+            wandb.finish()
+            logger.info("W&B logging finished")
+        except Exception as e:
+            logger.error(f"Error finishing W&B run: {e}")
 
 if __name__ == "__main__":
     main()
