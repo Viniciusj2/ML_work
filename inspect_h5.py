@@ -43,14 +43,14 @@ def inspect_h5_file(filename, num_samples=3):
             file.visititems(lambda name, obj: print_samples(name, obj, num_samples))
             
     except Exception as e:
-        print(f"\n❌ Error inspecting file: {e}")
+        print(f"\n Error inspecting file: {e}")
 
 def print_h5_structure(name, obj):
     """Print basic structure information"""
     if isinstance(obj, h5py.Group):
-        print(f"📁 Group: {name}")
+        print(f" Group: {name}")
     elif isinstance(obj, h5py.Dataset):
-        print(f"📊 Dataset: {name} (Shape: {obj.shape}, Dtype: {obj.dtype})")
+        print(f" Dataset: {name} (Shape: {obj.shape}, Dtype: {obj.dtype})")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Inspect HDF5 file contents')
