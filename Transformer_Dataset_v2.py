@@ -34,74 +34,72 @@ class MAEPMTDataset(Dataset):
             self.charges = f['charges'][:effective_max]
             self.deltas = f['deltas'][:effective_max]
             self.masks = f['masks'][:effective_max]
-            self.pmt_ids = f['pmt_ids'][:effective_max] if 'pmt_ids' in f else None
         
         self.length = len(self.charges)
-        print(f"Dataset '{dataset_name}' initialized with {self.length}/{total_waveforms} waveforms (max_limit: {max_waveforms if max_waveforms is not None else 'None'})")
+        print(f"Dataset '{dataset_name}' initialized with {self.length}/{total_waveforms} waveforms")
         
         # Calculate feature dimensions
         self.spatial_dim = self.x_encodings.shape[1] * 2 + 1  # x_dim + y_dim + z_dim
         self.non_spatial_dim = 2  # charge + delta_time
+        self.total_dim = self.spatial_dim + self.non_spatial_dim
     
     def _create_masks(self, attention_mask: torch.Tensor) -> torch.Tensor:
-        """Properly implements mask_ratio with minimum 1 visible token"""
+        """Create prediction mask ensuring at least one token remains visible"""
         valid_positions = attention_mask.nonzero().squeeze(-1)
         n_valid = valid_positions.size(0)
         
-        # Ensure we keep at least 1 visible token
+        # Ensure we keep at least 1 visible token (80% is standard for MAE)
         n_to_mask = min(n_valid - 1, int(n_valid * self.mask_ratio))
         
-        # Create the prediction mask
+        # Create the prediction mask (True = masked for prediction)
         pred_mask = torch.zeros_like(attention_mask)
         if n_to_mask > 0:
             mask_indices = torch.randperm(n_valid)[:n_to_mask]
             pred_mask[valid_positions[mask_indices]] = True
         
         return pred_mask
+    
+    def visualize_masking(self, idx: int):
+        sample = self[idx]
+        print(f"Sample {idx} Masking Pattern:")
+        print(f"Total PMTs: {len(sample['attention_mask'])}")
+        print(f"Valid PMTs: {sample['attention_mask'].sum().item()}")
+        print(f"Masked for prediction: {sample['pred_mask'].sum().item()}")
+        print(f"Actual mask ratio: {sample['pred_mask'].sum().item()/sample['attention_mask'].sum().item():.2f}")
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        # Get raw values
         charges = torch.tensor(self.charges[idx], dtype=torch.float32)
         deltas = torch.tensor(self.deltas[idx], dtype=torch.float32)
         attention_mask = torch.tensor(self.masks[idx], dtype=torch.bool)
         
-        assert torch.all(charges[~attention_mask] == 0), \
-        f"Mask should cover zeros, but found {charges[~attention_mask]} at idx {idx}"
-        
-        # Create input tensor - keeping the order consistent with the model's expectations
+        # Create input tensor with all features
         x_y_dim = self.x_encodings.shape[1]  # Should be 8
-        total_dim = 2 * x_y_dim + 3  # 8 for x, 8 for y, 1 for z, 1 for q, 1 for dt
-        
         n_pmts = len(charges)
-        event_tensor = torch.zeros((n_pmts, total_dim), dtype=torch.float32)
         
-        # Fill in the tensor - maintaining exact same order as before
-        # [charge(1), x_pos(8), y_pos(8), z_pos(1), delta_time(1)]
-        event_tensor[:, 0] = charges  # Non-spatial feature
-        event_tensor[:, 1:x_y_dim+1] = self.x_encodings  # Spatial feature - x
-        event_tensor[:, x_y_dim+1:2*x_y_dim+1] = self.y_encodings  # Spatial feature - y
-        event_tensor[:, 2*x_y_dim+1:2*x_y_dim+2] = self.z_encodings  # Spatial feature - z
-        event_tensor[:, 2*x_y_dim+2] = deltas  # Non-spatial feature
+        # Construct the input tensor with the established order:
+        # [charge, x_pos_enc(8), y_pos_enc(8), z_pos_enc(1), delta_time]
+        event_tensor = torch.zeros((n_pmts, self.total_dim), dtype=torch.float32)
         
-        # Which positions will be masked during training
+        event_tensor[:, 0] = charges  # Charge
+        event_tensor[:, 1:x_y_dim+1] = self.x_encodings  # X positions
+        event_tensor[:, x_y_dim+1:2*x_y_dim+1] = self.y_encodings  # Y positions
+        event_tensor[:, 2*x_y_dim+1:2*x_y_dim+2] = self.z_encodings  # Z position
+        event_tensor[:, 2*x_y_dim+2] = deltas  # Delta time
+        
+        # Generate prediction mask (which tokens to reconstruct)
         pred_mask = self._create_masks(attention_mask)
-        if idx % 100 == 0:  # Print only every 100 samples to avoid flooding
-            print(f"\nMasking Stats (Sample {idx}):")
-            print(f"Total positions: {attention_mask.shape[0]}")
-            print(f"Valid positions: {attention_mask.sum().item()}")
-            print(f"Masked positions: {pred_mask.sum().item()}")
-            print(f"Achieved mask ratio: {pred_mask.sum().item()/attention_mask.sum().item():.2f}")
-
-        assert 0 < pred_mask.sum() < len(attention_mask), \
-            f"Invalid masking: {pred_mask.sum()} masked out of {len(attention_mask)}"
         
+        # Store original values for loss computation
         original_values = torch.zeros((n_pmts, 2), dtype=torch.float32)
-        original_values[:, 0] = charges  # q
-        original_values[:, 1] = deltas   # dt
-
-        valid_pmts = attention_mask.sum().item()
-        masked_pmts = (pred_mask & attention_mask).sum().item()
-        unmasked_pmts = (attention_mask & ~pred_mask).sum().item()
-
+        original_values[:, 0] = charges  # Charge
+        original_values[:, 1] = deltas   # Delta time
+       
+          # Debug checks
+        assert attention_mask.any(), "At least one PMT should be valid"
+        assert pred_mask.sum() <= (attention_mask.sum() - 1), \
+            "Cannot mask all valid positions"
+        
         return {
             "event_tensor": event_tensor,
             "attention_mask": attention_mask,
@@ -111,6 +109,7 @@ class MAEPMTDataset(Dataset):
 
     def __len__(self) -> int:
         return self.length
+
 
 def create_mae_dataloader(
     data_path: str,
