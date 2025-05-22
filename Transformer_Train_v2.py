@@ -25,26 +25,26 @@ def parse_args():
     parser.add_argument('--cosmic_file', type=str, required=False, default='preprocessed_data/cosmic_events_processed.h5', help='Path to preprocessed cosmic data file')
     parser.add_argument('--marley_file', type=str, required=False, default='preprocessed_data/marley_events_processed.h5', help='Path to preprocessed marley data file')
     parser.add_argument('--pos_encoding_file', type=str, required=False, default='preprocessed_data/position_encodings.npz', help='Path to position encodings file')
-    parser.add_argument("--output_dir", type=str, default="./checkpoints_test", help="Directory to save checkpoints")
+    parser.add_argument("--output_dir", type=str, default="./checkpoints_test_2", help="Directory to save checkpoints")
     
     # Training parameters
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size for training")
-    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs to train for")
-    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train for")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
     parser.add_argument("--mask_ratio", type=float, default=0.50, help="Ratio of tokens to mask")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of dataloader workers")
     parser.add_argument("--train_split", type=float, default=0.8, help="Train/val split ratio")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--seed", type=int, default=84, help="Random seed")
     
     # Debug options
     parser.add_argument("--debug", action="store_true", help="Enable debug mode with subset of data")
-    parser.add_argument("--max_waveforms", type=int, default=200, 
+    parser.add_argument("--max_waveforms", type=int, default=10, 
                         help="Maximum number of waveforms to use when debug mode is enabled")
     
     # Model parameters
-    parser.add_argument("--encoder_dim", type=int, default=64, help="Encoder embedding dimension")
-    parser.add_argument("--decoder_dim", type=int, default=64, help="Decoder embedding dimension")
+    parser.add_argument("--encoder_dim", type=int, default=256, help="Encoder embedding dimension")
+    parser.add_argument("--decoder_dim", type=int, default=128, help="Decoder embedding dimension")
     parser.add_argument("--encoder_heads", type=int, default=16, help="Number of encoder attention heads")
     parser.add_argument("--decoder_heads", type=int, default=8, help="Number of decoder attention heads")
     parser.add_argument("--encoder_layers", type=int, default=12, help="Number of encoder layers")
@@ -54,14 +54,14 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     
     # New feature separation parameters
-    parser.add_argument("--spatial_dim", type=int, default=17, help="Dimension of spatial features (8 for x + 8 for y + 1 for z)")
-    parser.add_argument("--non_spatial_dim", type=int, default=2, help="Dimension of non-spatial features (1 for charge + 1 for delta time)")
+    #parser.add_argument("--spatial_dim", type=int, default=17, help="Dimension of spatial features (8 for x + 8 for y + 1 for z)")
+    #parser.add_argument("--non_spatial_dim", type=int, default=2, help="Dimension of non-spatial features (1 for charge + 1 for delta time)")
     
     # W&B parameters
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases logging")
     parser.add_argument("--project", type=str, default="pmt-mae-transformer", help="W&B project name")
     parser.add_argument("--run_name", type=str, default=None, help="W&B run name")
-    parser.add_argument("--warmup_epochs", type=int, default=0, help="Number of warmup epochs for LR scheduler")
+    parser.add_argument("--warmup_epochs", type=int, default=4, help="Number of warmup epochs for LR scheduler")
     
     return parser.parse_args()
 
@@ -524,8 +524,8 @@ def main():
     # Create model with separated spatial and non-spatial features
     model = MAETransformerModel(
         input_dim=spatial_dim + non_spatial_dim,  # Total input dimension
-        spatial_dim=spatial_dim,
-        non_spatial_dim=non_spatial_dim,
+      #  spatial_dim=spatial_dim,
+      #  non_spatial_dim=non_spatial_dim,
         encoder_embedding_dim=args.encoder_dim,
         decoder_embedding_dim=args.decoder_dim,
         encoder_num_heads=args.encoder_heads,
