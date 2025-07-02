@@ -405,7 +405,7 @@ if __name__ == "__main__":
     classifier = MAEBinaryClassifier(
         mae_model=mae_model,
         freeze_encoder=True,  # Keep MAE features frozen
-        pooling_strategy="max"  # Try different pooling strategies
+        pooling_strategy="max"  
     )
     
     # Create dataloaders
