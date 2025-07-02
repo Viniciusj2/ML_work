@@ -86,8 +86,8 @@ echo "Output directory: $OUTPUT_DIR"
 
 # Run the training script within the Singularity container
 #singularity exec --nv $CONTAINER python3 Classifier_Train_multi.py 
-#singularity exec --nv -B $WORKDIR $CONTAINER bash -c "cd $WORKDIR && python3 Classifier_Train_multi.py"
-singularity exec --nv -B $WORKDIR $CONTAINER bash -c "cd $WORKDIR && python3 Classifier_Train_wandb.py"
+singularity exec --nv -B $WORKDIR $CONTAINER bash -c "cd $WORKDIR && python3 Classifier_Train_multi.py"
+#singularity exec --nv -B $WORKDIR $CONTAINER bash -c "cd $WORKDIR && python3 Classifier_Train_wandb.py"
 
 # Check if training completed successfully
 if [ $? -eq 0 ]; then
