@@ -23,13 +23,11 @@ echo "Loading Singularity module..."
 module load singularity/3.5.3
 echo "Singularity module loaded."
 
-# Load only the Python module - we'll use packages from inside the container
+# Load only the Python module
 echo "Loading Python module..."
 module load python/3.8
 module load cuda/11.7
-# Try to find the correct cudnn version
 module spider cudnn
-# Try to find the correct PyTorch version  
 module spider pytorch
 echo "Modules loaded."
 
