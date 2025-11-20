@@ -15,7 +15,7 @@ class ClassificationDataset(Dataset):
         cosmic_data_path: str,
         marley_data_path: str,
         pos_encoding_path: str,
-        max_waveforms_per_class: Optional[int] = 1000
+        max_waveforms_per_class: Optional[int] = None
     ):
         self.pos_encoding_path = pos_encoding_path
         
